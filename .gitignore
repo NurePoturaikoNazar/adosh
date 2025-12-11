@@ -1,0 +1,15 @@
+__pycache__/
+.venv/
+venv/
+env/
+*.pyc
+outputs/
+outputs/*
+*.png
+*.jpg
+*.jpeg
+__pypackages__/
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
