@@ -2,20 +2,18 @@ import os
 from glob import glob
 import numpy as np
 from scipy.io import wavfile
-import matplotlib.pyplot as plt
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 from scipy.signal import find_peaks
-
 
 EXPECTED_FRAMERATE = 22050
 EXPECTED_CHANNELS = 1
-EXPECTED_SAMPLE_WIDTH = 1  # (8-bit)
-
+EXPECTED_SAMPLE_WIDTH = 1
 
 def ensure_outputs_dir(base_dir):
     out = os.path.join(base_dir, 'outputs')
     os.makedirs(out, exist_ok=True)
     return out
-
 
 def load_wav_lab2(path):
     if not os.path.isfile(path):
@@ -36,7 +34,6 @@ def load_wav_lab2(path):
     data_u8 = ((data_f - mn) / (mx - mn) * 255).astype(np.uint8)
     return fs, data_u8
 
-
 def convert_analog_to_pulse(data_u8, k=0.8):
     a = np.abs(data_u8.astype(np.int32) - 128)
     amax = int(a.max())
@@ -55,25 +52,54 @@ def convert_analog_to_pulse(data_u8, k=0.8):
             b[i] = 0
     return b, p
 
-
 def write_pulse_wav(path, b, fs, one_value=50, zero_value=128):
     out = np.where(b == 1, one_value, zero_value).astype(np.uint8)
     wavfile.write(path, fs, out)
 
-
-def plot_input_output(save_path, input_arr, output_arr, fs, title=''):
+def plot_input_output_interactive(save_path, input_arr, output_arr, fs, title=''):
     t = np.arange(len(input_arr)) / fs
-    fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    axs[0].plot(t, input_arr, linewidth=0.5)
-    axs[0].set_ylabel('Amplitude')
-    axs[0].set_title(f'{title} - Input')
-    axs[1].plot(t, output_arr, linewidth=0.5)
-    axs[1].set_ylabel('Pulse')
-    axs[1].set_xlabel('Time, s')
-    plt.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
+    
+    fig = make_subplots(
+        rows=3, cols=1,
+        subplot_titles=(f'{title} - Input (Amplitude)', 
+                       f'{title} - Output (Pulse)',
+                       f'{title} - Overlayed (Amplitude + Pulse)'),
+        vertical_spacing=0.1
+    )
+    
+    fig.add_trace(
+        go.Scatter(x=t, y=input_arr, name='Amplitude', line=dict(width=1)),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Scatter(x=t, y=output_arr, name='Pulse', line=dict(width=1, color='red')),
+        row=2, col=1
+    )
+    
+    fig.add_trace(
+        go.Scatter(x=t, y=input_arr, name='Amplitude', line=dict(width=1, color='blue')),
+        row=3, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=t, y=output_arr, name='Pulse', line=dict(width=1, color='red', dash='dot')),
+        row=3, col=1
+    )
+    
+    fig.update_xaxes(title_text="Time, s", row=3, col=1)
+    fig.update_yaxes(title_text="Amplitude", row=1, col=1)
+    fig.update_yaxes(title_text="Pulse", row=2, col=1)
+    fig.update_yaxes(title_text="Value", row=3, col=1)
+    
+    fig.update_layout(
+        height=900,
+        showlegend=True,
+        template="plotly_dark",
+        hovermode='x unified'
+    )
+    
+    fig.write_html(save_path)
+    fig.show()
 
 def compute_v1_v2_from_pulse(b):
     n = b.size
@@ -83,7 +109,6 @@ def compute_v1_v2_from_pulse(b):
     v1 = first.sum() / max(1, first.size)
     v2 = second.sum() / max(1, second.size)
     return float(v1), float(v2)
-
 
 def find_speech_file(base_dir):
     sounds_dir = os.path.join(base_dir, 'sounds lab 2')
@@ -97,7 +122,6 @@ def find_speech_file(base_dir):
         if os.path.isfile(p):
             return p
     return None
-
 
 def find_vowel_sources(base_dir):
     sounds_dir = os.path.join(base_dir, 'sounds lab 2')
@@ -115,7 +139,6 @@ def find_vowel_sources(base_dir):
             return [(combined[0], 'combined')]
     return []
 
-
 def split_combined_to_three(fs, data_u8):
     frame_len = max(512, int(0.02 * fs))
     hop = frame_len // 4
@@ -125,10 +148,10 @@ def split_combined_to_three(fs, data_u8):
         s = i * hop
         frame = data_u8[s:s+frame_len]
         energy[i] = np.sum((frame.astype(np.int32) - 128) ** 2)
-
+    
     window = np.ones(5) / 5.0
     energy_s = np.convolve(energy, window, mode='same')
-
+    
     thr = max(energy_s) * 0.25
     voiced = energy_s > thr
     regions = []
@@ -142,7 +165,7 @@ def split_combined_to_three(fs, data_u8):
             i = j
         else:
             i += 1
-
+    
     centers = []
     if len(regions) >= 3:
         reg_energies = [(np.sum(energy_s[s:e]), s, e) for (s, e) in regions]
@@ -159,24 +182,124 @@ def split_combined_to_three(fs, data_u8):
             peaks = np.argsort(energy_s)[-3:]
         for pk in np.sort(peaks):
             centers.append(int(pk * hop + frame_len // 2))
-
+    
     seg_len = int(0.45 * fs)
     segments = []
     for c in centers:
         start = max(0, int(c - seg_len // 2))
         end = min(len(data_u8), int(c + seg_len // 2))
         segments.append(data_u8[start:end])
-
+    
     while len(segments) < 3:
         segments.append(np.array([], dtype=np.uint8))
-
+    
     return segments
 
+def plot_triangle_interactive(vowel_segments, outputs):
+    xs = []
+    ys = []
+    labs = []
+    colors_map = {'a': 'red', 'u': 'blue', 'i': 'green'}
+    
+    for lab in ('a', 'u', 'i'):
+        if lab in vowel_segments:
+            v1, v2 = vowel_segments[lab]
+            xs.append(v1)
+            ys.append(v2)
+            labs.append(lab)
+    
+    if not xs:
+        return
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=xs,
+        y=ys,
+        mode='markers+text',
+        marker=dict(
+            size=15,
+            color=[colors_map.get(lab, 'white') for lab in labs],
+            line=dict(width=2, color='white')
+        ),
+        text=labs,
+        textposition='top center',
+        textfont=dict(size=16, color='white'),
+        name='Vowels',
+        hovertemplate='%{text}<br>v1=%{x:.4f}<br>v2=%{y:.4f}<extra></extra>'
+    ))
+    
+    if len(xs) > 1:
+        triangle_xs = xs + [xs[0]]
+        triangle_ys = ys + [ys[0]]
+        
+        fig.add_trace(go.Scatter(
+            x=triangle_xs,
+            y=triangle_ys,
+            mode='lines',
+            line=dict(color='cyan', width=2, dash='dash'),
+            name='Triangle',
+            hoverinfo='skip'
+        ))
+        
+        centroid_x = np.mean(xs)
+        centroid_y = np.mean(ys)
+        
+        scatter_x = []
+        scatter_y = []
+        num_points = 50
+        
+        for i in range(len(xs)):
+            next_i = (i + 1) % len(xs)
+            for j in range(num_points):
+                alpha = np.random.beta(2, 5)
+                beta = np.random.beta(2, 5)
+                gamma = 1 - alpha - beta
+                if gamma < 0:
+                    alpha = alpha / (alpha + beta)
+                    beta = 1 - alpha
+                    gamma = 0
+                
+                px = alpha * xs[i] + beta * xs[next_i] + gamma * centroid_x
+                py = alpha * ys[i] + beta * ys[next_i] + gamma * centroid_y
+                scatter_x.append(px)
+                scatter_y.append(py)
+        
+        fig.add_trace(go.Scatter(
+            x=scatter_x,
+            y=scatter_y,
+            mode='markers',
+            marker=dict(
+                size=3,
+                color='rgba(255, 255, 255, 0.3)',
+                symbol='circle'
+            ),
+            name='Point Cloud',
+            hoverinfo='skip'
+        ))
+    
+    fig.update_layout(
+        title='Triangle of Vowels (Interactive)',
+        xaxis_title='v1 (density first half)',
+        yaxis_title='v2 (density second half)',
+        template='plotly_dark',
+        showlegend=True,
+        hovermode='closest',
+        width=800,
+        height=800,
+        xaxis=dict(showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)'),
+        yaxis=dict(showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)', scaleanchor='x')
+    )
+    
+    html_path = os.path.join(outputs, 'vowel_triangle_interactive.html')
+    fig.write_html(html_path)
+    print(f"Saved interactive triangle: {html_path}")
+    fig.show()
 
 def main():
     base_dir = os.path.dirname(__file__)
     outputs = ensure_outputs_dir(base_dir)
-
+    
     speech_path = find_speech_file(base_dir)
     if speech_path is None:
         print("--- 1. Обробка файлу мови: ---")
@@ -192,11 +315,11 @@ def main():
             pulse, p = convert_analog_to_pulse(data, k=0.8)
             out_wav = os.path.join(outputs, 'speech_if.wav')
             write_pulse_wav(out_wav, pulse, fs, one_value=50)
-            out_png = os.path.join(outputs, 'speech_analysis.png')
+            out_html = os.path.join(outputs, 'speech_analysis.html')
             write_sig = np.where(pulse == 1, 200, 128).astype(np.uint8)
-            plot_input_output(out_png, data, write_sig, fs, title='speech')
-            print(f"Processed speech -> {out_wav}, {out_png}")
-
+            plot_input_output_interactive(out_html, data, write_sig, fs, title='speech')
+            print(f"Processed speech -> {out_wav}, {out_html}")
+    
     print("\n--- 2. Побудова трикутника (a, u, i) ---")
     vowel_sources = find_vowel_sources(base_dir)
     vowel_segments = {}
@@ -219,9 +342,9 @@ def main():
                     pulse, p = convert_analog_to_pulse(seg, k=0.8)
                     out_wav = os.path.join(outputs, f'{lab}_if.wav')
                     write_pulse_wav(out_wav, pulse, fs_c, one_value=50)
-                    out_png = os.path.join(outputs, f'{lab}_analysis.png')
+                    out_html = os.path.join(outputs, f'{lab}_analysis.html')
                     write_sig = np.where(pulse == 1, 200, 128).astype(np.uint8)
-                    plot_input_output(out_png, seg, write_sig, fs_c, title=lab)
+                    plot_input_output_interactive(out_html, seg, write_sig, fs_c, title=lab)
                     v1, v2 = compute_v1_v2_from_pulse(pulse)
                     vowel_segments[lab] = (v1, v2)
                     print(f"Processed {lab}: v1={v1:.4f}, v2={v2:.4f}")
@@ -235,39 +358,15 @@ def main():
                 pulse, p = convert_analog_to_pulse(data_v, k=0.8)
                 out_wav = os.path.join(outputs, f'{lab}_if.wav')
                 write_pulse_wav(out_wav, pulse, fs_v, one_value=50)
-                out_png = os.path.join(outputs, f'{lab}_analysis.png')
+                out_html = os.path.join(outputs, f'{lab}_analysis.html')
                 write_sig = np.where(pulse == 1, 200, 128).astype(np.uint8)
-                plot_input_output(out_png, data_v, write_sig, fs_v, title=lab)
+                plot_input_output_interactive(out_html, data_v, write_sig, fs_v, title=lab)
                 v1, v2 = compute_v1_v2_from_pulse(pulse)
                 vowel_segments[lab] = (v1, v2)
                 print(f"Processed {lab}: v1={v1:.4f}, v2={v2:.4f}")
-
+    
     if vowel_segments:
-        xs = []
-        ys = []
-        labs = []
-        for lab in ('a', 'u', 'i'):
-            if lab in vowel_segments:
-                v1, v2 = vowel_segments[lab]
-                xs.append(v1)
-                ys.append(v2)
-                labs.append(lab)
-        if xs:
-            plt.figure(figsize=(6, 6))
-            plt.scatter(xs, ys)
-            for i, lab in enumerate(labs):
-                plt.text(xs[i], ys[i], lab)
-            if len(xs) > 1:
-                plt.plot(xs + [xs[0]], ys + [ys[0]])
-            plt.xlabel('v1 (density first half)')
-            plt.ylabel('v2 (density second half)')
-            plt.title('Triangle of vowels')
-            plt.grid(True)
-            tri_png = os.path.join(outputs, 'vowel_triangle.png')
-            plt.savefig(tri_png)
-            plt.close()
-            print(f"Saved triangle: {tri_png}")
-
+        plot_triangle_interactive(vowel_segments, outputs)
 
 if __name__ == '__main__':
     main()
