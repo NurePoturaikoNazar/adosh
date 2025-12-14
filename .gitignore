@@ -8,8 +8,13 @@ outputs/*
 *.png
 *.jpg
 *.jpeg
+*.pdf
+*.zip
+*.lock
+
 __pypackages__/
 .ipynb_checkpoints/
 *.egg-info/
 dist/
 build/
+lab 1 complete
